@@ -260,18 +260,30 @@ class S2P2(TorchBaseModel):
             right_us_BNm1H,
         )
 
-        event_ll, non_event_ll, num_events = self.compute_loglikelihood(
+        event_ll, non_event_ll, num_events, mark_ll, time_ll_pos = (
+            self.compute_loglikelihood(
                 lambda_at_event=intensity_B_Nm1_M,
                 lambdas_loss_samples=intensity_dts_B_Nm1_G_M,
                 time_delta_seq=dts_BN[:, 1:],
                 seq_mask=batch_non_pad_mask[:, 1:],
                 type_seq=marks_BN[:, 1:],
+            )
         )
+
+        # compute extra statistics
+        time_ll = time_ll_pos - non_event_ll
 
         # compute loss to optimize
         loss = -(event_ll - non_event_ll).sum()
 
-        return loss, num_events
+        return_raw_ll = kwargs.get("return_raw_ll", False)
+        res_dict = (
+            {"non_event_ll": non_event_ll, "mark_intensity": intensity_B_Nm1_M}
+            if return_raw_ll
+            else None
+        )
+
+        return loss, num_events, mark_ll.sum(), time_ll.sum(), res_dict
 
     def compute_intensities_at_sample_times(
         self, event_times_BN, inter_event_times_BN, marks_BN, sample_dtimes, **kwargs

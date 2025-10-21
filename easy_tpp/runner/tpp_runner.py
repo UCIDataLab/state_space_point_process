@@ -1,8 +1,10 @@
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 
 from easy_tpp.runner.base_runner import Runner
 from easy_tpp.utils import RunnerPhase, logger, MetricsHelper, MetricsTracker, concat_element, save_pickle
 from easy_tpp.utils.const import Backend
+
+# from tqdm import tqdm
 
 
 @Runner.register(name='std_tpp')
@@ -40,7 +42,7 @@ class TPPRunner(Runner):
                                                    self.runner_config.base_config,
                                                    self.runner_config.model_config,
                                                    self.runner_config.trainer_config)
-            num_params = count_model_params(self.model)
+            self.num_params = count_model_params(self.model)
 
         else:
             from easy_tpp.utils.tf_utils import set_seed
@@ -54,9 +56,9 @@ class TPPRunner(Runner):
                                                 self.runner_config.base_config,
                                                 self.runner_config.model_config,
                                                 self.runner_config.trainer_config)
-            num_params = count_model_params()
+            self.num_params = count_model_params()
 
-        info_msg = f'Num of model parameters {num_params}'
+        info_msg = f'Num of model parameters {self.num_params}'
         logger.info(info_msg)
 
     def _save_model(self, model_dir, **kwargs):
@@ -88,10 +90,16 @@ class TPPRunner(Runner):
             train_loader (EasyTPP.DataLoader): data loader for the train set.
             valid_loader (EasyTPP.DataLoader): data loader for the valid set.
         """
+        save_model_id = kwargs.get('save_model_id', None)
         test_loader = kwargs.get('test_loader')
+        best_metrics = dict()
+        losses = defaultdict(list)
         for i in range(self.runner_config.trainer_config.max_epoch):
-            train_metrics = self.run_one_epoch(train_loader, RunnerPhase.TRAIN)
-
+            train_metrics = self.run_one_epoch(train_loader, RunnerPhase.TRAIN, **kwargs)
+            if not train_metrics['loglike'] == train_metrics['loglike']:
+                print('Log-likelihood is Nan.')
+                break  # early stop for NaN loss
+            losses['train_loss'].append(-train_metrics['loglike'])
             message = f"[ Epoch {i} (train) ]: train " + MetricsHelper.metrics_dict_to_str(train_metrics)
             logger.info(message)
 
@@ -100,6 +108,7 @@ class TPPRunner(Runner):
             # evaluate model
             if i % self.runner_config.trainer_config.valid_freq == 0:
                 valid_metrics = self.run_one_epoch(valid_loader, RunnerPhase.VALIDATE)
+                losses['valid_loss'].append(-valid_metrics['loglike'])
 
                 self.model_wrapper.write_summary(i, valid_metrics, RunnerPhase.VALIDATE)
 
@@ -113,21 +122,28 @@ class TPPRunner(Runner):
 
                 if updated:
                     message_valid += f", best updated at this epoch"
-                    self.model_wrapper.save(self.runner_config.base_config.specs['saved_model_dir'])
+                    best_metrics['train'], best_metrics['valid'] = train_metrics, valid_metrics
+                    if save_model_id:
+                        self.model_wrapper.save(self.runner_config.base_config.specs['saved_model_dir'] + save_model_id + '.pt')
+                    else:
+                        self.model_wrapper.save(self.runner_config.base_config.specs['saved_model_dir'] + '.pt')
 
                 if test_loader is not None:
                     test_metrics = self.run_one_epoch(test_loader, RunnerPhase.VALIDATE)
+                    losses['test_loss'].append(-test_metrics['loglike'])
 
                     message = f"[ Epoch {i} (test) ]: test " + MetricsHelper.metrics_dict_to_str(test_metrics)
                     logger.info(message)
+                    if updated:
+                        best_metrics['test'] = test_metrics
 
                 logger.critical(message_valid)
 
         self.model_wrapper.close_summary()
 
-        return
+        return self.metrics_tracker.current_best['loglike'], self.metrics_tracker.episode_best, best_metrics, self.num_params, losses
 
-    def _evaluate_model(self, data_loader, **kwargs):
+    def _evaluate_model(self, data_loader, **kwargs):  # This is only used for TEST data
         """Evaluate the model on the valid dataset.
 
         Args:
@@ -149,7 +165,7 @@ class TPPRunner(Runner):
 
         return eval_metrics
 
-    def _gen_model(self, data_loader, **kwargs):
+    def _gen_model(self, data_loader, **kwargs):  # NOTE: we're NOT using it for evaluation
         """Generation of the TPP, one-step and multi-step are both supported.
         """
 
@@ -165,7 +181,7 @@ class TPPRunner(Runner):
 
         return
 
-    def run_one_epoch(self, data_loader, phase):
+    def run_one_epoch(self, data_loader, phase, **kwargs):
         """Run one complete epoch.
 
         Args:
@@ -176,6 +192,8 @@ class TPPRunner(Runner):
             a dict of metrics
         """
         total_loss = 0
+        total_mark_ll = 0
+        total_time_ll = 0
         total_num_event = 0
         epoch_label = []
         epoch_pred = []
@@ -184,18 +202,21 @@ class TPPRunner(Runner):
         metrics_dict = OrderedDict()
         if phase in [RunnerPhase.TRAIN, RunnerPhase.VALIDATE]:
             for batch in data_loader:
-                batch_loss, batch_num_event, batch_pred, batch_label, batch_mask = \
-                    self.model_wrapper.run_batch(batch, phase=phase)
+                batch_loss, batch_mark_ll, batch_time_ll, batch_num_event, batch_pred, batch_label, batch_mask = \
+                    self.model_wrapper.run_batch(batch, phase=phase, padded_event_id = pad_index)
 
                 total_loss += batch_loss
+                total_mark_ll += batch_mark_ll
+                total_time_ll += batch_time_ll
                 total_num_event += batch_num_event
                 epoch_pred.append(batch_pred)
                 epoch_label.append(batch_label)
                 epoch_mask.append(batch_mask)
 
             avg_loss = total_loss / total_num_event
-
-            metrics_dict.update({'loglike': -avg_loss, 'num_events': total_num_event})
+            metrics_dict.update({'loglike': -avg_loss, 'num_events': total_num_event,
+                                 'mark_ll': total_mark_ll / total_num_event,
+                                 'time_ll': total_time_ll / total_num_event})
 
         else:
             for batch in data_loader:

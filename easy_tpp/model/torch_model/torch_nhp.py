@@ -4,14 +4,12 @@ from torch import nn
 from easy_tpp.model.torch_model.torch_basemodel import TorchBaseModel
 from easy_tpp.model.torch_model.torch_baselayer import ScaledSoftplus
 
-
 class ContTimeLSTMCell(nn.Module):
-    """LSTM Cell in Neural Hawkes Process, NeurIPS'17.
-    """
+    """LSTM Cell in Neural Hawkes Process, NeurIPS'17."""
 
     def __init__(self, hidden_dim):
         """Initialize the continuous LSTM cell.
-
+            
         Args:
             hidden_dim (int): dim of hidden state.
         """
@@ -26,7 +24,7 @@ class ContTimeLSTMCell(nn.Module):
             hidden_dim (int): dim of hidden state.
         """
 
-        self.linear_layer = nn.Linear(2 * hidden_dim, 7 * hidden_dim, bias=bias)
+        self.linear_layer = nn.Linear(2*hidden_dim, 7*hidden_dim, bias=bias)
         self.softplus = nn.Softplus()
 
     def forward(self, x_i, hidden_ti_minus, ct_ti_minus, c_bar_im1):
@@ -47,18 +45,18 @@ class ContTimeLSTMCell(nn.Module):
         i_i, i_bar_i, f_i, f_bar_i, z_i, o_i, delta_i = self.linear_layer(x_i_).chunk(7, dim=-1)
 
         i_i, i_bar_i, f_i, f_bar_i, z_i, o_i, delta_i = (
-            torch.sigmoid(i_i),  # Eq (5a)
+            torch.sigmoid(i_i),      # Eq (5a)
             torch.sigmoid(i_bar_i),  # Eq (5a) - Bar version
-            torch.sigmoid(f_i),  # Eq (5b)
+            torch.sigmoid(f_i),      # Eq (5b)
             torch.sigmoid(f_bar_i),  # Eq (5b) - Bar version
-            torch.tanh(z_i),  # Eq (5c)
-            torch.sigmoid(o_i),  # Eq (5d)
-            self.softplus(delta_i)  # Eq (6c)
-        )
-
+            torch.tanh(z_i),         # Eq (5c)
+            torch.sigmoid(o_i),      # Eq (5d)
+            self.softplus(delta_i)   # Eq (6c)
+       )
+        
         # Eq (6a)
         c_i = f_i * ct_ti_minus + i_i * z_i
-
+    
         # Eq (6b)
         c_bar_i = f_bar_i * c_bar_im1 + i_bar_i * z_i
 
@@ -79,7 +77,9 @@ class ContTimeLSTMCell(nn.Module):
         """
 
         c_t = c_bar_i + (c_i - c_bar_i) * torch.exp(-delta_i * dtime)
-        h_t = o_i * torch.tanh(c_t)
+
+        h_t = o_i * torch.tanh(c_t) 
+
         return c_t, h_t
 
 
@@ -109,6 +109,7 @@ class NHP(TorchBaseModel):
             4 * self.hidden_size,
             device=self.device).chunk(4, dim=1)
         return c_t, c_bar_t, delta_t, o_t  # Okay to initialize delta to be zero because c==c_bar at the beginning
+
 
     def forward(self, batch):
         '''
@@ -152,6 +153,7 @@ class NHP(TorchBaseModel):
         right_hiddens = torch.stack(right_states, dim=-2)  # (batch_size, seq_len, 4 * hidden_dim)
         return left_hiddens, right_hiddens
 
+
     def get_states(self, right_hiddens, sample_dts):
         """
         right_hiddens:  (batch_size, seq_len, 4 * hidden_dim): (c_t, c_bar_t, delta_t, o_t)
@@ -167,15 +169,8 @@ class NHP(TorchBaseModel):
                                       sample_dts[..., None])
         return h_ts
 
-    def loglike_loss(self, batch):
-        """Compute the log-likelihood loss.
-
-        Args:
-            batch (list): batch input.
-
-        Returns:
-            tuple: loglikelihood loss and num of events.
-        """
+    def loglike_loss(self, batch, **kwargs):
+        """Compute the log-likelihood loss."""
         ts_BN, dts_BN, marks_BN, batch_non_pad_mask, _ = batch
 
         # 1. compute hidden states at event time
@@ -193,16 +188,25 @@ class NHP(TorchBaseModel):
         # 4. evaluate intensity at dt_samples for MC *from the left limit* after decay -> shape (B, N-1, G, M)
         intensity_dts_B_Nm1_G_M = self.layer_intensity(self.get_states(right_hiddens, dts_sample_B_Nm1_G))
 
-        event_ll, non_event_ll, num_events = self.compute_loglikelihood(
+        event_ll, non_event_ll, num_events, mark_ll, time_ll_pos = self.compute_loglikelihood(
             lambda_at_event=intensity_B_Nm1_M,
             lambdas_loss_samples=intensity_dts_B_Nm1_G_M,
             time_delta_seq=dts_BN[:, 1:],
             seq_mask=batch_non_pad_mask[:, 1:],
-            type_seq=marks_BN[:, 1:])
+            type_seq=marks_BN[:, 1:]
+            )
 
-        # compute loss to minimize
+        # compute extra statistics
+        time_ll = time_ll_pos - non_event_ll
+
+        # compute loss to optimize
         loss = - (event_ll - non_event_ll).sum()
-        return loss, num_events
+
+        return_raw_ll = kwargs.get("return_raw_ll", False)
+        res_dict = {'non_event_ll': non_event_ll, 'mark_intensity': intensity_B_Nm1_M} if return_raw_ll else None
+
+        return loss, num_events, mark_ll.sum(), time_ll.sum(), res_dict
+
 
     def compute_intensities_at_sample_times(self, time_seqs, time_delta_seqs, type_seqs, sample_dtimes, **kwargs):
         """Compute the intensity at sampled times, not only event times.
@@ -222,7 +226,8 @@ class NHP(TorchBaseModel):
 
         _input = time_seqs, time_delta_seqs, type_seqs, None, None
 
-        # We will need the right limit at the last given event to decay from and get the left limits for sampling
+        # Note that the input will be given up to the second last event
+        # We will need the right limit at the last given event to decay from and get the left limits
         _, right_hiddens = self.forward(_input)
 
         c_i, c_bar_i, delta_i, o_i = torch.chunk(right_hiddens, 4, dim=-1)

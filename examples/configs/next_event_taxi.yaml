@@ -1,0 +1,228 @@
+pipeline_config_id: runner_config
+
+data:
+  taxi:
+    data_format: json  # json
+    train_dir:  easytpp/taxi  # ./data/taxi_pkl/train.pkl
+    valid_dir:  easytpp/taxi # ./data/taxi_pkl/dev.pkl
+    test_dir:  easytpp/taxi # ./data/taxi_pkl/test.pkl
+    data_specs:
+      num_event_types: 10
+      pad_token_id: 10
+      padding_side: right
+
+
+RMTPP_eval:
+  base_config:
+    stage: eval
+    backend: torch
+    dataset_id: taxi
+    runner_id: std_tpp
+    base_dir: './checkpoints/'
+    model_id: RMTPP
+  trainer_config:
+    batch_size: 16  # 256
+    max_epoch: 1
+    gpu: 5
+    seed: 123
+  model_config:
+    hidden_size: 128
+    loss_integral_num_sample_per_step: 10
+    use_mc_samples: True
+    use_ln: False
+    pretrained_model_dir: ./checkpoints/taxi/RMTPP/saved_model.pt
+    thinning:
+      num_sample: 50000
+      num_exp: 1000
+      over_sample_rate: 2
+      num_samples_boundary: 5
+      dtime_max: 2
+
+
+
+NHP_eval:
+  base_config:
+    stage: eval
+    backend: torch
+    dataset_id: taxi
+    runner_id: std_tpp
+    base_dir: './checkpoints/'
+    model_id: NHP
+  trainer_config:
+    batch_size: 16  # 64
+    max_epoch: 1
+    gpu: 5
+    seed: 123
+  model_config:
+    hidden_size: 128
+    loss_integral_num_sample_per_step: 10
+    use_mc_samples: True
+    use_ln: False
+    pretrained_model_dir: ./checkpoints/taxi/NHP/saved_model.pt
+    thinning:
+      num_sample: 50000
+      num_exp: 1000
+      over_sample_rate: 2
+      num_samples_boundary: 5
+      dtime_max: 2
+
+
+
+SAHP_eval:
+  base_config:
+    stage: eval
+    backend: torch
+    dataset_id: taxi
+    runner_id: std_tpp
+    base_dir: './checkpoints/'
+    model_id: SAHP
+  trainer_config:
+    batch_size: 16  # 256
+    max_epoch: 1
+    gpu: 5
+    seed: 123
+  model_config:
+    hidden_size: 16
+    num_layers: 2
+    num_heads: 4
+    loss_integral_num_sample_per_step: 10
+    use_mc_samples: True
+    use_ln: False
+    pretrained_model_dir: ./checkpoints/taxi/SAHP/saved_model.pt
+    thinning:
+      num_sample: 50000
+      num_exp: 1000 
+      over_sample_rate: 2
+      num_samples_boundary: 5
+      dtime_max: 2
+
+
+THP_eval:
+  base_config:
+    stage: eval
+    backend: torch
+    dataset_id: taxi
+    runner_id: std_tpp
+    base_dir: './checkpoints/'
+    model_id: THP
+  trainer_config:
+    batch_size: 16  # 256 # 64
+    max_epoch: 1
+    gpu: 5
+    seed: 123
+  model_config:
+    hidden_size: 128
+    num_layers: 1
+    num_heads: 4
+    loss_integral_num_sample_per_step: 10
+    use_mc_samples: True
+    use_ln: False
+    pretrained_model_dir: ./checkpoints/taxi/THP/saved_model.pt
+    thinning:
+      num_sample: 50000
+      num_exp: 1000
+      over_sample_rate: 2
+      num_samples_boundary: 5
+      dtime_max: 2
+
+
+AttNHP_eval:
+  base_config:
+    stage: eval
+    backend: torch
+    dataset_id: taxi
+    runner_id: std_tpp
+    base_dir: './checkpoints/'
+    model_id: AttNHP
+  trainer_config:
+    batch_size: 16  # 256
+    max_epoch: 1
+    gpu: 5
+    seed: 123
+  model_config:
+    hidden_size: 16
+    time_emb_size: 16
+    num_layers: 3
+    num_heads: 4
+    loss_integral_num_sample_per_step: 10
+    use_mc_samples: True
+    use_ln: False
+    pretrained_model_dir: ./checkpoints/taxi/AttNHP/saved_model.pt
+    thinning:
+      num_sample: 50000
+      num_exp: 1000 
+      over_sample_rate: 2
+      num_samples_boundary: 5
+      dtime_max: 2
+
+
+
+IntensityFree_eval:
+  base_config:
+    stage: eval
+    backend: torch
+    dataset_id: taxi
+    runner_id: std_tpp
+    base_dir: './checkpoints/'
+    model_id: IntensityFree
+  trainer_config:
+    batch_size: 16  # 256
+    max_epoch: 1
+    gpu: 5
+    seed: 123
+  model_config:
+    hidden_size: 32
+    num_layers: 1
+    loss_integral_num_sample_per_step: 10
+    use_mc_samples: True
+    use_ln: False
+    pretrained_model_dir: ./checkpoints/taxi/IntensityFree/saved_model.pt
+    thinning:
+      num_sample: 50000
+      num_exp: 1000
+      over_sample_rate: 2
+      num_samples_boundary: 5
+      dtime_max: 2
+    model_specs:
+      num_mix_components: 3
+
+
+
+S2P2_eval:
+  base_config:
+    stage: eval
+    backend: torch
+    dataset_id: taxi
+    runner_id: std_tpp
+    base_dir: './checkpoints/'
+    model_id: S2P2
+  trainer_config:
+    batch_size: 16  # 256  # 64
+    max_epoch: 1
+    gpu: -1
+    seed: 123
+  model_config:
+    hidden_size: 128
+    loss_integral_num_sample_per_step: 10 # 10
+    use_mc_samples: True # True
+    use_ln: False
+    pretrained_model_dir: ./checkpoints/taxi/S2P2/saved_model.pt
+    thinning:  # We re-use configs for trapezoidal estimation of the _expected_ next event time.
+      num_sample: 50000
+      num_exp: 1000  # our implementation need much less candidate times
+      over_sample_rate: 2  # used to multiply the max intensity value for upper bound
+      num_samples_boundary: 5  # used in compute_intensity_upper_bound
+      dtime_max: 2
+    num_layers: 4
+    model_specs:
+      P: 16
+      act_func: gelu
+      for_loop: False
+      pre_norm: False
+      post_norm: True
+      int_forward_variant: False
+      int_backward_variant: True
+      delta_rank: null  # Defaults to full rank if unspecified
+      relative_time: True
+      separate_heads: False
+

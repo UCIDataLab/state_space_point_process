@@ -3,6 +3,7 @@ from abc import abstractmethod
 
 from easy_tpp.preprocess import TPPDataLoader
 from easy_tpp.utils import Registrable, Timer, logger, get_unique_id, LogConst, get_stage, RunnerPhase
+import time
 
 
 class Runner(Registrable):
@@ -39,11 +40,15 @@ class Runner(Registrable):
                 **kwargs
             )
 
-        # Needed for Intensity Free model
-        mean_log_inter_time, std_log_inter_time, min_dt, max_dt = (
-            self._data_loader.train_loader().dataset.get_dt_stats())
-        runner_config.model_config.set("mean_log_inter_time", mean_log_inter_time)
-        runner_config.model_config.set("std_log_inter_time", std_log_inter_time)
+            # Used for warm up
+            runner_config.trainer_config.set('epoch_len', len(self._data_loader.train_loader()))
+
+            # Needed for Intensity Free model
+            mean_log_inter_time, std_log_inter_time, min_dt, max_dt = (
+                self._data_loader.train_loader().dataset.get_dt_stats())
+            assert (min_dt > 0.)
+            runner_config.model_config.set("mean_log_inter_time", mean_log_inter_time)
+            runner_config.model_config.set("std_log_inter_time", std_log_inter_time)
         self.timer = Timer()
 
     @staticmethod
@@ -101,18 +106,30 @@ class Runner(Registrable):
         timer.start()
         model_id = self.runner_config.base_config.model_id
         logger.info(f'Start {model_id} training...')
-        model = self._train_model(
+
+        t0 = time.perf_counter()
+        best_ll, best_epochs, best_metrics, num_params, losses = self._train_model(
             train_loader,
             valid_loader,
             test_loader=test_loader,
             **kwargs
         )
+        t1 = time.perf_counter()
         logger.info(f'End {model_id} train! Cost time: {timer.end()}')
-        return model
+        train_log = {
+            'dataset': self.runner_config.base_config.dataset_id,
+            'num_params': num_params,
+            'best_valid_ll': best_ll,
+            'best_valid_epoch': best_epochs,
+            'best_metrics': best_metrics,
+            'train_time': t1-t0,
+            'losses': losses
+        }
+        return train_log
 
-    def evaluate(self, valid_loader=None, **kwargs):
-        if valid_loader is None:
-            valid_loader = self._data_loader.valid_loader()
+    def evaluate(self, test_loader=None, **kwargs):
+        if test_loader is None:
+            test_loader = self._data_loader.test_loader()
 
         logger.info(f'Data \'{self.runner_config.base_config.dataset_id}\' loaded...')
 
@@ -121,14 +138,14 @@ class Runner(Registrable):
         model_id = self.runner_config.base_config.model_id
         logger.info(f'Start {model_id} evaluation...')
 
-        metric = self._evaluate_model(
-            valid_loader,
+        metrics = self._evaluate_model(
+            test_loader,
             **kwargs
         )
         logger.info(f'End {model_id} evaluation! Cost time: {timer.end()}')
-        return metric['rmse']  # return a list of scalr for HPO to use
+        return metrics
 
-    def gen(self, gen_loader=None, **kwargs):
+    def gen(self, gen_loader=None, **kwargs):  # We did not use this in S2P2 paper.
         if gen_loader is None:
             gen_loader = self._data_loader.test_loader()
 

@@ -1,9 +1,9 @@
-""" Initialize a Pytorch model wrapper that feed into Model Runner   """
+"""Initialize a Pytorch model wrapper that feed into Model Runner"""
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from easy_tpp.utils import RunnerPhase, set_optimizer, set_device
+from easy_tpp.utils import RunnerPhase, get_lr_scheduler, set_device, set_optimizer
 
 
 class TorchModelWrapper:
@@ -30,7 +30,23 @@ class TorchModelWrapper:
             # set up optimizer
             optimizer = self.trainer_config.optimizer
             self.learning_rate = self.trainer_config.learning_rate
-            self.opt = set_optimizer(optimizer, self.model.parameters(), self.learning_rate)
+            if self.trainer_config.lr_scheduler == False:
+                self.opt = set_optimizer(
+                    optimizer, self.model.parameters(), self.learning_rate
+                )
+            else:
+                # self.opt = get_optimizer(self.model, self.trainer_config)
+                self.opt = set_optimizer(
+                    optimizer,
+                    self.model.parameters(),
+                    self.learning_rate,
+                    weight_decay=self.trainer_config.weight_decay,
+                )
+                self.lr_scheduler = get_lr_scheduler(
+                    self.opt,
+                    self.trainer_config,
+                    epoch_len=self.trainer_config.epoch_len,
+                )
 
         # set up tensorboard
         self.train_summary_writer, self.valid_summary_writer = None, None
@@ -74,15 +90,14 @@ class TorchModelWrapper:
 
             if summary_writer is not None:
                 for k, v in kv_pairs.items():
-                    if k != 'num_events':
+                    if k != "num_events":
                         summary_writer.add_scalar(k, v, epoch)
 
                 summary_writer.flush()
         return
 
     def close_summary(self):
-        """Close the tensorboard summary writer.
-        """
+        """Close the tensorboard summary writer."""
         if self.train_summary_writer is not None:
             self.train_summary_writer.close()
 
@@ -90,7 +105,7 @@ class TorchModelWrapper:
             self.valid_summary_writer.close()
         return
 
-    def run_batch(self, batch, phase):
+    def run_batch(self, batch, phase, **kwargs):
         """Run one batch.
 
         Args:
@@ -101,41 +116,80 @@ class TorchModelWrapper:
             tuple: for training and validation we return loss, prediction and labels;
             for prediction we return prediction.
         """
-
+        padded_event_id = kwargs.get("padded_event_id", None)
         batch = batch.to(self.device).values()
         if phase in (RunnerPhase.TRAIN, RunnerPhase.VALIDATE):
             # set mode to train
-            is_training = (phase == RunnerPhase.TRAIN)
+            is_training = phase == RunnerPhase.TRAIN
             self.model.train(is_training)
 
             # FullyRNN needs grad event in validation stage
-            grad_flag = is_training if not self.model_id == 'FullyNN' else True
+            grad_flag = is_training if not self.model_id == "FullyNN" else True
             # run model
-            with torch.set_grad_enabled(grad_flag):
-                loss, num_event = self.model.loglike_loss(batch)
+            # with torch.set_grad_enabled(grad_flag):
+            if grad_flag:
+                loss, num_event, mark_ll_sum, time_ll_sum, _ = self.model.loglike_loss(
+                    batch
+                )
+            else:
+                # this is needed during training so drop out and layer norm are set properly
+                self.model.eval()
+                with torch.no_grad():
+                    loss, num_event, mark_ll_sum, time_ll_sum, _ = (
+                        self.model.loglike_loss(batch)
+                    )
 
             # Assume we dont do prediction on train set
             pred_dtime, pred_type, label_dtime, label_type, mask = None, None, None, None, None
 
             # update grad
             if is_training:
-                self.opt.zero_grad()
-                (loss / num_event).backward()
-                self.opt.step()
+                with torch.autograd.set_detect_anomaly(True):
+                    self.opt.zero_grad()
+                    # print(f'Current batch lr: {self.lr_scheduler.get_lr()}')
+                    (loss / num_event).backward()
+
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), max_norm=1, error_if_nonfinite=True
+                    )
+                    self.opt.step()
+                    self.lr_scheduler.step()
+
             else:  # by default we do not do evaluation on train set which may take a long time
                 if self.model.event_sampler:
                     self.model.eval()
                     with torch.no_grad():
                         if batch[1] is not None and batch[2] is not None:
-                            label_dtime, label_type = batch[1][:, 1:].cpu().numpy(), batch[2][:, 1:].cpu().numpy()
+                            label_dtime, label_type = (
+                                batch[1][:, 1:].cpu().numpy(),
+                                batch[2][:, 1:].cpu().numpy(),
+                            )
                         if batch[3] is not None:
-                            mask = batch[3][:, 1:].cpu().numpy()
-                        pred_dtime, pred_type = self.model.predict_one_step_at_every_event(batch=batch)
+                            mask = batch[3][:, 1:]
+                            # Not to grade both time and mark predictions.
+                            mask[batch[2][:, 1:] == padded_event_id] = (
+                                False  # avoid grading right window events if padded
+                            )
+                            mask = mask.cpu().numpy()
+                        pred_dtime, pred_type = (
+                            self.model.predict_one_step_at_every_event(batch=batch)
+                        )
                         pred_dtime = pred_dtime.detach().cpu().numpy()
                         pred_type = pred_type.detach().cpu().numpy()
-            return loss.item(), num_event, (pred_dtime, pred_type), (label_dtime, label_type), (mask,)
-        else:
-            pred_dtime, pred_type, label_dtime, label_type = self.model.predict_multi_step_since_last_event(batch=batch)
+
+            return (
+                loss.item(),
+                mark_ll_sum.item(),
+                time_ll_sum.item(),
+                num_event,
+                (pred_dtime, pred_type),
+                (label_dtime, label_type),
+                (mask,),
+            )
+        else:  # This is used in PREDICT phase but we do NOT use it, because we didn't fix the code.
+            pred_dtime, pred_type, label_dtime, label_type = (
+                self.model.predict_multi_step_since_last_event(batch=batch)
+            )
             pred_dtime = pred_dtime.detach().cpu().numpy()
             pred_type = pred_type.detach().cpu().numpy()
             label_dtime = label_dtime.detach().cpu().numpy()

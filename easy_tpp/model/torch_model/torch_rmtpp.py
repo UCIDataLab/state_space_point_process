@@ -57,7 +57,7 @@ class RMTPP(TorchBaseModel):
         return left_intensity_B_Nm1_M, right_hiddens_BNH
 
 
-    def loglike_loss(self, batch):
+    def loglike_loss(self, batch, **kwargs):
         """Compute the log-likelihood loss.
 
         Args:
@@ -77,7 +77,7 @@ class RMTPP(TorchBaseModel):
         dts_sample_B_Nm1_G = self.make_dtime_loss_samples(dts_BN[:, 1:])
         intensity_dts_B_Nm1_G_M = self.evolve_and_get_intentsity(right_hiddens_B_Nm1_H, dts_sample_B_Nm1_G)
 
-        event_ll, non_event_ll, num_events = self.compute_loglikelihood(
+        event_ll, non_event_ll, num_events, mark_ll, time_ll_pos = self.compute_loglikelihood(
             lambda_at_event=left_intensity_B_Nm1_M,
             lambdas_loss_samples=intensity_dts_B_Nm1_G_M,
             time_delta_seq=dts_BN[:, 1:],
@@ -85,9 +85,16 @@ class RMTPP(TorchBaseModel):
             type_seq=marks_BN[:, 1:]
         )
 
-        # compute loss to minimize
+        # compute extra statistics
+        time_ll = time_ll_pos - non_event_ll
+
+        # compute loss to optimize
         loss = - (event_ll - non_event_ll).sum()
-        return loss, num_events
+
+        return_raw_ll = kwargs.get("return_raw_ll", False)
+        res_dict = {'non_event_ll': non_event_ll, 'mark_intensity': left_intensity_B_Nm1_M} if return_raw_ll else None
+
+        return loss, num_events, mark_ll.sum(), time_ll.sum(), res_dict
 
 
 

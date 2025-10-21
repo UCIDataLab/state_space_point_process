@@ -74,6 +74,9 @@ class SAHP(TorchBaseModel):
 
         Args:
             encode_state (tensor): [batch_size, seq_len, hidden_size].
+            mu (tensor): [batch_size, seq_len, num_marks].
+            eta (tensor): [batch_size, seq_len, num_marks].
+            gamma (tensor): [batch_size, seq_len, num_marks].
             duration_t (tensor): [batch_size, seq_len, num_sample].
 
         Returns:
@@ -111,7 +114,7 @@ class SAHP(TorchBaseModel):
         # [batch_size, seq_len, hidden_dim]
         return enc_output
 
-    def loglike_loss(self, batch):
+    def loglike_loss(self, batch, **kwargs):
         """Compute the log-likelihood loss.
 
         Args:
@@ -141,15 +144,27 @@ class SAHP(TorchBaseModel):
                                                              sample_dtimes=sample_dtimes)
         lambda_t_sample = self.softplus(state_t_sample)
 
-        event_ll, non_event_ll, num_events = self.compute_loglikelihood(lambda_at_event=lambda_at_event,
-                                                                        lambdas_loss_samples=lambda_t_sample,
-                                                                        time_delta_seq=time_delta_seqs[:, 1:],
-                                                                        seq_mask=batch_non_pad_mask[:, 1:],
-                                                                        type_seq=type_seqs[:, 1:])
+        # print(self.softplus.log_beta)
 
-        # compute loss to minimize
+        event_ll, non_event_ll, num_events, mark_ll, time_ll_pos = self.compute_loglikelihood(
+            lambda_at_event=lambda_at_event,
+            lambdas_loss_samples=lambda_t_sample,
+            time_delta_seq=time_delta_seqs[:, 1:],
+            seq_mask=batch_non_pad_mask[:, 1:],
+            type_seq=type_seqs[:, 1:]
+            )
+
+        # compute extra statistics
+        time_ll = time_ll_pos - non_event_ll
+
+        # compute loss to optimize
         loss = - (event_ll - non_event_ll).sum()
-        return loss, num_events
+
+        return_raw_ll = kwargs.get("return_raw_ll", False)
+        res_dict = {'non_event_ll': non_event_ll, 'mark_intensity': lambda_at_event} if return_raw_ll else None
+
+        return loss, num_events, mark_ll.sum(), time_ll.sum(), res_dict
+
 
     def compute_states_at_sample_times(self,
                                        encode_state,

@@ -14,6 +14,7 @@ from easy_tpp.utils.registrable import Registrable
 from easy_tpp.utils.torch_utils import set_device, set_optimizer, set_seed, count_model_params
 from easy_tpp.utils.generic import is_torch_device, is_numpy_array
 from easy_tpp.utils.gen_utils import generate_and_save_json
+from easy_tpp.utils.optim import get_lr_scheduler
 
 __all__ = ['py_assert',
            'make_config_string',
@@ -59,4 +60,5 @@ __all__ = ['py_assert',
            'is_numpy_array',
            'save_json',
            'load_json',
-           'generate_and_save_json']
+           'generate_and_save_json',
+           'get_lr_scheduler']

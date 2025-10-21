@@ -18,6 +18,10 @@ class TrainerConfig(Config):
         self.valid_freq = kwargs.get('valid_freq', 1)
         self.use_tfb = kwargs.get('use_tfb', False)
         self.metrics = kwargs.get('metrics', ['acc', 'rmse'])
+        self.lr_scheduler = kwargs.get('lr_scheduler', False)
+        self.weight_decay = kwargs.get('weight_decay', 0.)
+        self.warmup_pct = kwargs.get('warmup_pct', 0.)
+        self.lr_decay_style = kwargs.get('lr_decay_style', 'cosine')
 
     def get_yaml_config(self):
         """Return the config in dict (yaml compatible) format.
@@ -34,7 +38,11 @@ class TrainerConfig(Config):
                 'learning_rate': self.learning_rate,
                 'valid_freq': self.valid_freq,
                 'use_tfb': self.use_tfb,
-                'metrics': self.metrics
+                'metrics': self.metrics,
+                'lr_scheduler': self.lr_scheduler,
+                'weight_decay': self.weight_decay,
+                'warmup_pct': self.warmup_pct,
+                'lr_decay_style': self.lr_decay_style,
                 }
 
     @staticmethod
@@ -62,7 +70,11 @@ class TrainerConfig(Config):
                              learning_rate=self.learning_rate,
                              valid_freq=self.valid_freq,
                              use_tfb=self.use_tfb,
-                             metrics=self.metrics
+                             metrics=self.metrics,
+                             lr_scheduler=self.lr_scheduler,
+                             weight_decay=self.weight_decay,
+                             warmup_pct=self.warmup_pct,
+                             lr_decay_style=self.lr_decay_style,
                              )
 
 
@@ -144,9 +156,12 @@ class BaseConfig(Config):
     def set_backend(backend):
         if backend.lower() in ['torch', 'pytorch']:
             return Backend.Torch
+        elif backend.lower() in ['tf', 'tensorflow']:
+            return Backend.TF
         else:
             raise ValueError(
-                f"Backend should be 'torch' or 'pytorch', current value: {backend}"
+                f"Backend  should be selected between 'torch or pytorch' and 'tf or tensorflow', "
+                f"current value: {backend}"
             )
 
     def get_yaml_config(self):
@@ -199,6 +214,7 @@ class ModelConfig(Config):
         self.time_emb_size = kwargs.get('time_emb_size', 16)
         self.num_layers = kwargs.get('num_layers', 2)
         self.num_heads = kwargs.get('num_heads', 2)
+        # self.mc_num_sample_per_step = kwargs.get('mc_num_sample_per_step', 20)  # this is shared by loss_num_sample
         self.sharing_param_layer = kwargs.get('sharing_param_layer', False)
         self.use_mc_samples = kwargs.get('use_mc_samples', True)  # if using MC samples in computing log-likelihood
         self.loss_integral_num_sample_per_step = kwargs.get('loss_integral_num_sample_per_step', 20)  # mc_num_sample_per_step
@@ -224,6 +240,7 @@ class ModelConfig(Config):
                 'hidden_size': self.hidden_size,
                 'time_emb_size': self.time_emb_size,
                 'num_layers': self.num_layers,
+                # 'mc_num_sample_per_step': self.mc_num_sample_per_step,
                 'sharing_param_layer': self.sharing_param_layer,
                 'loss_integral_num_sample_per_step': self.loss_integral_num_sample_per_step,
                 'dropout_rate': self.dropout_rate,
@@ -261,6 +278,7 @@ class ModelConfig(Config):
                            hidden_size=self.hidden_size,
                            time_emb_size=self.time_emb_size,
                            num_layers=self.num_layers,
+                           # mc_num_sample_per_step=self.mc_num_sample_per_step,
                            sharing_param_layer=self.sharing_param_layer,
                            loss_integral_num_sample_per_step=self.loss_integral_num_sample_per_step,
                            dropout_rate=self.dropout_rate,
