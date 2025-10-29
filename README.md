@@ -1,13 +1,13 @@
 # Deep Continuous-Time State-Space Models for Marked Event Sequences <span style="font-size: 0.7em;">[NeurIPS 2025 Spotlight]</span>
 
-### Proposed Model
+## Proposed Model
 
 This work developed a novel class of marked temporal point process (MTPP) models, _state-space point process_ (S2P2), inspired by linear Hawkes processes and deep state-space models. S2P2 brings linear complexity and sublinear scaling to MTPP while being highly expressive.
 
 The implementation for our method can be found under `easy_tpp/model/torch_model/torch_s2p2.py`, with helper functions implemented in `easy_tpp/ssm/*` which contain the code for each LLH layer in the S2P2 framework. We extended the public MTPP library `EasyTPP` (ICLR 2024) to compare all models under the same pipeline. Our model has been [fully integrated](https://github.com/ant-research/EasyTemporalPointProcess/blob/main/easy_tpp/model/torch_model/torch_s2p2.py) into [EasyTPP](https://github.com/ant-research/EasyTemporalPointProcess).
 
 
-### Additional Changes from EasyTPP
+## Additional Changes from EasyTPP
 
 Major code changes:
 1. Decompose log-likelihood into time- and mark-specific components for in-depth analysis.
@@ -16,7 +16,7 @@ Major code changes:
 Other minor changes include adding the learning rate scheduler and other features to stabilize training, adding the preprocessing script under `ehrshot_processing/` to prepare an MTPP dataset derived from the [EHRSHOT](https://som-shahlab.github.io/ehrshot-website/) dataset, and changing the default directory to save models.
 
 
-### Running Code
+## Running Code
 To setup the environment, perform
 ```bash
 pip install -r requirements.txt
