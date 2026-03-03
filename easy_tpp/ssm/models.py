@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .initializers import (
-    make_DPLR_HiPPO,  # , lecun_normal_ #  init_VinvB, init_log_steps,
+    make_DPLR_HiPPO, init_log_steps # , lecun_normal_ #  init_VinvB,
 )
 
 MATRIX_SCALING_FACTOR = 1
@@ -178,9 +178,7 @@ class LLH(nn.Module):
                 bias += th.log(-th.expm1(-bias))
                 self.delta_net.bias.copy_(bias)
         else:
-            self.log_step_size_P = nn.Parameter(
-                th.zeros(size=(self.P,)), requires_grad=False
-            )
+            self.log_step_size_P = nn.Parameter(init_log_steps(self.P, self.dt_init_min, self.dt_init_max))
 
     @property
     def Lambda_P(self):
